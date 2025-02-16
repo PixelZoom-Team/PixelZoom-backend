@@ -1,89 +1,61 @@
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
 import cv2
 import numpy as np
-import sys
+import shutil
+from pathlib import Path
 
-def analyze_minchunk(image_path):
-    # 이미지 로드
-    try:
-        image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-        if image is None:
-            raise ValueError("이미지를 불러올 수 없습니다.")
-    except Exception as e:
-        print(f"이미지 로드 에러: {str(e)}")
-        return None
+app = FastAPI()
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
 
-    # 이미지 전처리
-    try:
-        if image.shape[2] == 4:  # 알파 채널이 있는 경우
-            alpha_channel = image[:, :, 3]
-            if np.all(alpha_channel == 255):
-                image_no_bg = image[:, :, :3]
-                gray = cv2.cvtColor(image_no_bg, cv2.COLOR_BGR2GRAY)
-                _, mask = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
-            else:
-                _, mask = cv2.threshold(alpha_channel, 0, 255, cv2.THRESH_BINARY)
-                image_no_bg = image[:, :, :3]
-        else:  # RGB 이미지
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            _, mask = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
-            image_no_bg = image
+def visualize_and_classify_images(image_path):
+    # 테스트를 위한 간단한 구현
+    # 실제 도트 이미지 감지 로직은 여기에 구현
+    return 1  # 항상 도트 이미지로 판단
 
-        # 내용물 추출
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        x, y, w, h = cv2.boundingRect(contours[0])
-        content = image_no_bg[y:y+h, x:x+w]
+def resize_image(image, scale):
+    # 테스트를 위한 간단한 리사이즈 구현
+    height, width = image.shape[:2]
+    new_height = int(height * scale)
+    new_width = int(width * scale)
+    resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+    return resized
 
-        # MinChunk 분석
-        height, width = content.shape[:2]
-        min_val = min(height, width)
-        
-        # 공약수 찾기
-        common_divisors = []
-        for i in range(1, min_val + 1):
-            if height % i == 0 and width % i == 0:
-                common_divisors.append(i)
-
-        # MinChunk 검출
-        for element in reversed(common_divisors):
-            new_height = int(height / element)
-            new_width = int(width / element)
-            
-            minchunk_image = cv2.resize(content, (new_width, new_height), 
-                                      interpolation=cv2.INTER_NEAREST)
-            restored = cv2.resize(minchunk_image, (width, height), 
-                                interpolation=cv2.INTER_NEAREST)
-            
-            # 이미지 비교
-            difference = cv2.absdiff(content, restored)
-            _, diff = cv2.threshold(difference, 30, 255, cv2.THRESH_BINARY)
-            if np.count_nonzero(diff) == 0 and element != 1:
-                return {
-                    'minchunk_size': element,
-                    'original_size': (width, height),
-                    'minchunk_dimensions': (new_width, new_height)
-                }
-
-        return None
-
-    except Exception as e:
-        print(f"분석 중 에러 발생: {str(e)}")
-        return None
-
-def main():
-    if len(sys.argv) != 2:
-        print("사용법: python script.py <이미지_경로>")
-        return
-
-    image_path = sys.argv[1]
-    result = analyze_minchunk(image_path)
-
-    if result:
-        print("\n=== MinChunk 분석 결과 ===")
-        print(f"MinChunk 크기: {result['minchunk_size']}")
-        print(f"원본 크기: {result['original_size'][0]}x{result['original_size'][1]}")
-        print(f"MinChunk 차원: {result['minchunk_dimensions'][0]}x{result['minchunk_dimensions'][1]}")
-    else:
-        print("이미지가 이미 MinChunk이거나 분석에 실패했습니다.")
+@app.post("/upload/")
+async def upload_image(file: UploadFile = File(...), scale: float = 2.0):
+    # 파일 저장
+    file_path = UPLOAD_DIR / file.filename
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    # 이미지 처리
+    image = cv2.imread(str(file_path))
+    resized_image = resize_image(image, scale)
+    
+    # 결과 저장
+    output_path = f"resized_{file.filename}"
+    cv2.imwrite(str(UPLOAD_DIR / output_path), resized_image)
+    
+    # 응답 생성
+    response_data = {
+        "data": {
+            "original_size": {
+                "width": str(image.shape[1]),
+                "height": str(image.shape[0])
+            },
+            "resized_size": {
+                "width": str(resized_image.shape[1]),
+                "height": str(resized_image.shape[0])
+            }
+        },
+        "status": {
+            "type": "success",
+            "message": f"Image processed successfully. Resized file saved as {output_path}."
+        }
+    }
+    return JSONResponse(content=response_data)
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
