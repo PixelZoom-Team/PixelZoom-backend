@@ -83,6 +83,11 @@ pip install fastapi uvicorn python-multipart opencv-python
 python main.py
 ```
 
+테스트를 원한다면, 서버 실행 후, test_request.py 내에 예시 이미지 경로 입력한 후,
+```bash
+python test_request.py
+```
+
 서버가 시작되면 로컬 IP 주소와 함께 다음 정보가 표시됩니다:
 
 - API 서버 IP
